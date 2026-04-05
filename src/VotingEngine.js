@@ -1,42 +1,24 @@
-// VotingEngine.js
-// Collects votes from 3 agents, requires 2/3 consensus to fire a signal
-// 2/3 = normal signal | 3/3 = STRONG signal
-// Returns a signal object if consensus reached, null otherwise
+// VotingEngine.js — Uses pre-fetched candles, no extra API calls
+// Requires 2/3 consensus. 3/3 = STRONG signal.
 
 import { ATR } from 'technicalindicators';
-import { TwelveDataClient } from './TwelveDataClient.js';
 
 export class VotingEngine {
-  constructor() {
-    this.tdClient = new TwelveDataClient();
-  }
 
-  // Takes 3 agent results and current market data, returns signal or null
-  async buildSignal(pair, votes, sessionBoost = 0) {
+  // candles5m passed in from voting_index — no extra fetch needed
+  async buildSignal(pair, votes, candles5m, sessionBoost = 0) {
     const buyVotes  = votes.filter(v => v.vote === 'BUY');
     const sellVotes = votes.filter(v => v.vote === 'SELL');
-    const skipVotes = votes.filter(v => v.vote === 'SKIP');
 
-    const buyCount  = buyVotes.length;
-    const sellCount = sellVotes.length;
+    if (buyVotes.length < 2 && sellVotes.length < 2) return null;
 
-    // No consensus
-    if (buyCount < 2 && sellCount < 2) {
-      return null;
-    }
-
-    const direction  = buyCount >= sellCount ? 'BUY' : 'SELL';
-    const voteCount  = direction === 'BUY' ? buyCount : sellCount;
-    const isStrong   = voteCount === 3;
+    const direction    = buyVotes.length >= sellVotes.length ? 'BUY' : 'SELL';
     const winningVotes = direction === 'BUY' ? buyVotes : sellVotes;
+    const voteCount    = winningVotes.length;
+    const isStrong     = voteCount === 3;
+    const avgConfidence = Math.round(winningVotes.reduce((s, v) => s + v.confidence, 0) / voteCount);
 
-    // Average confidence of the winning agents
-    const avgConfidence = Math.round(
-      winningVotes.reduce((sum, v) => sum + v.confidence, 0) / winningVotes.length
-    );
-
-    // Get current price + SL/TP from 5min ATR
-    const candles5m = await this.tdClient.fetchCandles(pair, '5min', 30);
+    // Use already-fetched 5m candles for ATR/price — zero extra API credits
     if (!candles5m || candles5m.length < 15) return null;
 
     const currentPrice = candles5m[candles5m.length - 1].close;
@@ -45,41 +27,26 @@ export class VotingEngine {
     const closes = candles5m.map(c => c.close);
     const atrVals = ATR.calculate({ period: 14, high: highs, low: lows, close: closes });
     const atr5m = atrVals[atrVals.length - 1] || 0;
-
     if (atr5m === 0) return null;
 
-    let entry, sl, tp, rr;
+    let entry, sl, tp;
     if (direction === 'BUY') {
       entry = currentPrice;
       sl    = entry - (atr5m * 2.0);
       tp    = entry + (atr5m * 2.0 * 1.2);
-      rr    = 1.2;
     } else {
       entry = currentPrice;
       sl    = entry + (atr5m * 2.0);
       tp    = entry - (atr5m * 2.0 * 1.2);
-      rr    = 1.2;
     }
 
     return {
-      pair,
-      action: direction,
-      type: 'INTRADAY',
-      entry, sl, tp, rr,
-      atr: atr5m,
-
-      // Voting metadata
-      voteCount,
-      isStrong,
-      avgConfidence,
-      votes, // All 3 agent results
-
-      // Breakdown per agent
+      pair, action: direction, type: 'INTRADAY',
+      entry, sl, tp, rr: 1.2, atr: atr5m,
+      voteCount, isStrong, avgConfidence,
+      votes,
       agentResults: votes.map(v => ({
-        agent: v.agent,
-        vote: v.vote,
-        confidence: v.confidence,
-        reason: v.reason,
+        agent: v.agent, vote: v.vote, confidence: v.confidence, reason: v.reason,
       })),
     };
   }
