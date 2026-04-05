@@ -1,0 +1,15 @@
+{
+  "name": "voting-signal-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "3-Agent Voting Signal System — XAU/USD + BTC/USD | 2/3 consensus required",
+  "main": "src/voting_index.js",
+  "scripts": {
+    "start": "node src/voting_index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "technicalindicators": "^3.1.0",
+    "xml2js": "^0.6.2"
+  }
+}
